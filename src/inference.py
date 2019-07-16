@@ -143,7 +143,7 @@ class InferenceState:
 
     def sample(self, token_dists):
         if self.sample_type == 'max':
-            return token_dists.max(dim=-1)[1]
+            return token_dists.argmax(dim=-1)
         elif self.sample_type == 'sample':
             return Categorical(logits=token_dists/self.temperature).sample()
         else:

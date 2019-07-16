@@ -31,7 +31,6 @@ class TransformerLM(nn.Module):
         else:
             return logits
 
-
     def cached_forward(self, x, cache:List[torch.Tensor]):
         """
         Performs forward pass with cached state

@@ -57,7 +57,7 @@ class LMTrainer(BaseTrainer):
 
     def init_optimizers(self):
         # self.optim = TriangleAdam(self.model.parameters(), self.config.hp.get('optim', {}))
-        self.optim = torch.optim.Adam(self.model.parameters())
+        self.optim = torch.optim.Adam(self.model.parameters(), lr=1e-4)
 
     def train_on_batch(self, batch):
         loss = self.loss_on_batch(batch)
@@ -88,7 +88,9 @@ class LMTrainer(BaseTrainer):
         with torch.no_grad():
             for batch in self.val_dataloader:
                 input = batch.text.to(self.config.firelab.device_name)
-                _, input_state = self.model(input, return_state=True)
+                input = input[:, :5] # Leave only first 5 words
+                preds, input_state = self.model(input, return_state=True)
+                preds = preds.data[:, -1].argmax(dim=1, keepdim=True)
 
                 results = InferenceState({
                     "model": self.model.cached_forward,
@@ -98,15 +100,16 @@ class LMTrainer(BaseTrainer):
                     "max_len": 55,
                     "is_inputs_update_enabled": True,
                     "inputs_batch_dim": 1,
+                    "active_seqs": preds
                 }).inference()
 
                 results = [x.cpu().numpy().tolist() for x in results]
-                results = itos_many(results, self.vocab, sep='')
+                results = itos_many(results, self.vocab)
 
                 generated.extend(results)
-                sources.extend(itos_many(batch.text, self.vocab, sep=''))
+                sources.extend(itos_many(batch.text, self.vocab))
 
-        texts = ['`{} => {}`'.format(s,g) for s,g in zip(sources, generated)]
+        texts = ['`{} => {}`'.format(s, g) for s, g in zip(sources, generated)]
         text = '\n\n'.join(texts)
 
         self.writer.add_text('Samples', text, self.num_iters_done)
