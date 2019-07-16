@@ -1,0 +1,10 @@
+title: "Language Modeling with Transformer"
+trainer: "LMTrainer"
+random_seed: 42
+data_path: "data/classics.split.tok.5_50.common.bpe"
+hp:
+  batch_size: 64
+  transformer:
+    embed_dim: 32
+    num_layers: 2
+    max_seq_len: 512
