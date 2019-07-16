@@ -15,6 +15,7 @@ from firelab import BaseTrainer
 from src.models.transformer_lm import TransformerLM
 from src.utils import itos_many
 from src.optims.triangle_adam import TriangleAdam
+from src.inference import InferenceState
 
 
 class LMTrainer(BaseTrainer):
@@ -29,35 +30,34 @@ class LMTrainer(BaseTrainer):
         data_path_val = os.path.join(project_path, self.config.data.val)
 
         data_train = open(data_path_train).read().splitlines()
-        data_val = open(data_path_val).read().splitlines()[:self.config.val_set_size]
+        data_val = open(data_path_val).read().splitlines()[:self.config.get('val_set_size')]
 
-        self.eos = '|'
-        field = Field(eos_token=self.eos, batch_first=True)
+        field = Field(init_token='<bos>', eos_token='<eos>', batch_first=True)
 
-        train_examples = [Example.fromlist([self.eos.join(data_train)], [('text', field)])]
-        val_examples = [Example.fromlist([s], [('text', field)]) for s in data_val]
+        train_examples = [Example.fromlist([x], [('text', field)]) for x in data_train]
+        val_examples = [Example.fromlist([x], [('text', field)]) for x in data_val]
 
-        self.train_ds = Dataset(train_examples, [('text', field)])
-        self.val_ds = Dataset(val_examples, [('text', field)])
-
-        field.build_vocab(self.train_ds)
+        train_ds = Dataset(train_examples, [('text', field)])
+        val_ds = Dataset(val_examples, [('text', field)])
+        field.build_vocab(train_ds)
 
         self.vocab = field.vocab
-        self.train_dataloader = data.BPTTIterator(self.train_ds,
-            self.config.hp.batch_size, self.config.hp.batch_len, repeat=False)
-        self.val_dataloader = data.BucketIterator(
-            self.val_ds, self.config.hp.batch_size, shuffle=False, repeat=False)
+        self.train_dataloader = data.BucketIterator(train_ds, self.config.hp.batch_size, repeat=False)
+        self.val_dataloader = data.BucketIterator(val_ds, batch_size=self.config.hp.batch_size, shuffle=False, repeat=False)
 
         print('Dataloaders initialized!')
 
     def init_models(self):
-        self.lm = TransformerLM(self.config.hp.transformer, self.vocab).to(self.config.device_name)
+        self.model = TransformerLM(self.config.hp.transformer, self.vocab)
+        self.model = self.model.to(self.config.firelab.device_name)
 
     def init_criterions(self):
         self.criterion = nn.CrossEntropyLoss()
+        self.criterion = self.criterion.to(self.config.firelab.device_name)
 
     def init_optimizers(self):
-        self.optim = TriangleAdam(self.lm.parameters(), self.config.hp.optim)
+        # self.optim = TriangleAdam(self.model.parameters(), self.config.hp.get('optim', {}))
+        self.optim = torch.optim.Adam(self.model.parameters())
 
     def train_on_batch(self, batch):
         loss = self.loss_on_batch(batch)
@@ -69,25 +69,42 @@ class LMTrainer(BaseTrainer):
         self.writer.add_scalar('Train loss', loss.item(), self.num_iters_done)
 
     def loss_on_batch(self, batch):
-        batch.text = batch.text.transpose(0,1).to(self.config.device_name)
-        z = torch.zeros(batch.batch_size, self.config.hp.model_size).to(self.config.device_name)
-        preds = self.lm(z, batch.text[:, :-1])
-        loss = self.criterion(preds.view(-1, len(self.vocab)), batch.text[:, 1:].contiguous().view(-1))
+        sents = batch.text.to(self.config.firelab.device_name)
+
+        inputs = sents[:, :-1] # feed everything, except the last <eos> (or <pad>) tokens
+        targets = sents[:, 1:].contiguous().view(-1)
+
+        preds = self.model(inputs)
+        preds = preds.view(-1, len(self.vocab))
+
+        loss = self.criterion(preds, targets)
 
         return loss
 
     def validate(self):
         sources = []
         generated = []
-        batches = list(self.val_dataloader)
 
-        for batch in random.sample(batches, self.config.display_k_val_examples):
-            src = batch.text.to(self.config.device_name)
-            results = self.lm.inference(src.squeeze(), self.vocab, eos_token=self.eos, max_len=250)
-            results = itos_many([results], self.vocab, sep='')
+        with torch.no_grad():
+            for batch in self.val_dataloader:
+                input = batch.text.to(self.config.firelab.device_name)
+                _, input_state = self.model(input, return_state=True)
 
-            generated.extend(results)
-            sources.extend(itos_many(batch.text, self.vocab, sep=''))
+                results = InferenceState({
+                    "model": self.model.cached_forward,
+                    "inputs": input_state,
+                    "vocab": self.vocab,
+                    "device": self.config.firelab.device_name,
+                    "max_len": 55,
+                    "is_inputs_update_enabled": True,
+                    "inputs_batch_dim": 1,
+                }).inference()
+
+                results = [x.cpu().numpy().tolist() for x in results]
+                results = itos_many(results, self.vocab, sep='')
+
+                generated.extend(results)
+                sources.extend(itos_many(batch.text, self.vocab, sep=''))
 
         texts = ['`{} => {}`'.format(s,g) for s,g in zip(sources, generated)]
         text = '\n\n'.join(texts)

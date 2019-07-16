@@ -14,7 +14,6 @@ def itos_many(seqs:List[List[int]], vocab, remove_special=True, sep=' '):
     """
     Converts sequences of token ids to normal strings
     """
-
     sents = [[vocab.itos[i] for i in seq] for seq in seqs]
 
     if remove_special:

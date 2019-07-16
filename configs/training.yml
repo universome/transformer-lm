@@ -1,10 +1,15 @@
 title: "Language Modeling with Transformer"
 trainer: "LMTrainer"
 random_seed: 42
-data_path: "data/classics.split.tok.5_50.common.bpe"
+val_freq_iters: 10
+num_val_examples_to_display: 10
+data:
+  train: "data/generated/classics.split.tok.5_50.common.bpe.tiny-train"
+  val: "data/generated/classics.split.tok.5_50.common.bpe.tiny-val"
 hp:
   batch_size: 64
+  batch_len: 128
   transformer:
-    embed_dim: 32
+    d_model: 32
     num_layers: 2
     max_seq_len: 512

@@ -2,7 +2,6 @@ import torch as T
 import torch.nn as nn
 import torch.nn.functional as F
 import numpy as np
-from firelab.utils.training_utils import get_module_device
 from torch.distributions import Categorical
 
 # from src.utils.gumbel import gumbel_softmax_sample
@@ -20,6 +19,7 @@ class InferenceState:
         self.eos_token = state_dict.get('eos_token', '<eos>')
         self.pad_token = state_dict.get('pad_token', '<pad>')
         self.unk_token = state_dict.get('unk_token', '<unk>')
+        self.device = state_dict.get('device', 'cpu')
         self.bos_idx = self.vocab.stoi[self.bos_token]
         self.eos_idx = self.vocab.stoi[self.eos_token]
         self.pad_idx = self.vocab.stoi[self.pad_token]
@@ -32,7 +32,7 @@ class InferenceState:
         self.enc_mask = state_dict.get('enc_mask')
         self.should_stack_finished = state_dict.get('should_stack_finished', False)
         self.inputs_batch_dim = state_dict.get('inputs_batch_dim', 0)
-        self.substitute_inputs = state_dict.get('substitute_inputs', False)
+        self.is_inputs_update_enabled = state_dict.get('is_inputs_update_enabled', False)
         self.batch_size = self.inputs.size(self.inputs_batch_dim)
         self.active_seqs = state_dict.get('active_seqs', self.generate_active_seqs())
 
@@ -41,12 +41,11 @@ class InferenceState:
         self.active_seqs_idx = T.arange(self.batch_size)
         self.should_stop = False
         self.num_steps_done = 0
-        self.device = get_module_device(self.model)
 
         self.validate()
 
     def generate_active_seqs(self):
-        return T.tensor([[self.bos_idx] for _ in range(self.batch_size)]).long()
+        return T.tensor([[self.bos_idx] for _ in range(self.batch_size)], device=self.device).long()
 
     def validate(self):
         assert self.max_len > 0
@@ -125,18 +124,19 @@ class InferenceState:
         args = [] if self.enc_mask is None else self.enc_mask
 
         # TODO: this is really dirty
-        if self.substitute_inputs:
-            next_tokens_dists, inputs = self.model(self.inputs, self.active_seqs[:, self.num_steps_done:], *args, **self.kwargs)
+        if self.is_inputs_update_enabled:
+            next_tokens_dists, inputs = self.model(self.active_seqs[:, self.num_steps_done:], self.inputs, *args, **self.kwargs)
             next_tokens_dists = next_tokens_dists[:, -1]
             self.inputs = inputs
         else:
-            next_tokens_dists = self.model(self.inputs, self.active_seqs, *args, **self.kwargs)[:, -1]
+            next_tokens_dists = self.model(self.active_seqs, self.inputs, *args, **self.kwargs)[:, -1]
 
         next_tokens = self.sample(next_tokens_dists)
 
         if self.gumbel:
-            next_tokens_dists = F.softmax(next_tokens_dists, dim=1)
-            next_tokens_dists = gumbel_softmax_sample(next_tokens_dists, self.temperature)
+            # next_tokens_dists = F.softmax(next_tokens_dists, dim=1)
+            # next_tokens_dists = gumbel_softmax_sample(next_tokens_dists, self.temperature)
+            raise NotImplementedError('No Gumbel for you, sorry.')
 
         self.next_tokens = next_tokens
         self.next_tokens_dists = next_tokens_dists
@@ -168,13 +168,14 @@ class InferenceState:
         return self.finished
 
 
-def simple_inference(model, z, vocab, max_len=100, eos_token='<eos>'):
+def simple_inference(model, z, vocab, max_len=100, eos_token='<eos>', device='cpu'):
     infered = InferenceState({
         'model': model,
         'inputs': z,
         'vocab': vocab,
         'max_len': max_len,
-        'eos_token': eos_token
+        'eos_token': eos_token,
+        'device': device
     }).inference()
 
     infered = [x.cpu().numpy().tolist() for x in infered]
