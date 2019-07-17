@@ -2,19 +2,11 @@
 
 dataset=$1
 num_bpes=$2
-
-data_dir="data/generated"
-tmp_dir="$data_dir/_tmp-$RANDOM"
+bpes_path="data/generated/bpes-$num_bpes.txt"
 
 echo "Dataset: $dataset"
 echo "Num bpes: $num_bpes"
+echo "BPEs will be saved into $bpes_path"
 
-mkdir -p $tmp_dir
-
-bpes="$tmp_dir/bpes"
-
-subword-nmt learn-bpe -s $num_bpes < $dataset > $bpes
-subword-nmt apply-bpe -c $bpes < $dataset > $dataset.bpe
-
-# Cleaning
-rm -rf $tmp_dir
+subword-nmt learn-bpe -s $num_bpes < $dataset > $bpes_path
+subword-nmt apply-bpe -c $bpes_path < $dataset > $dataset.bpe
