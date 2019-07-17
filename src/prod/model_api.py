@@ -47,7 +47,9 @@ def predict(model, field, sentence_beginnings:List[str], max_len=50, batch_size=
             "max_len": max_len,
             "is_inputs_update_enabled": True,
             "inputs_batch_dim": 1,
-            "active_seqs": input
+            "active_seqs": input,
+            "sample_from_top": 0.5,
+            "temperature": 0.2
         }).inference()
 
         curr_results = [x.cpu().numpy().tolist() for x in curr_results]

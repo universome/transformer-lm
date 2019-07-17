@@ -30,6 +30,10 @@ class InferenceState:
         self.ignore_old_active_seqs = state_dict.get('ignore_old_active_seqs', False)
         self.temperature = state_dict.get('temperature', 1)
         self.sample_type = state_dict.get('sample_type', 'max') # max or sample
+
+        # If sample_from_top is enabled, user should provide how many top tokens to consider
+        self.top_sample_ratio = state_dict.get('top_sample_ratio', 1.)
+
         self.kwargs = state_dict.get('kwargs', {})
         self.gumbel = state_dict.get('gumbel', False) # TODO: decompose into add_gumbel_noise/ste/differentiable args
         self.enc_mask = state_dict.get('enc_mask')
@@ -148,6 +152,12 @@ class InferenceState:
         if self.sample_type == 'max':
             return token_dists.argmax(dim=-1)
         elif self.sample_type == 'sample':
+            return Categorical(logits=token_dists/self.temperature).sample()
+        elif self.sample_type == 'sample_from_top':
+            num_bins_to_take = int(self.top_sample_ratio * token_dists.size(1))
+            low_prob_thresh = token_dists.topk(num_bins_to_take, dim=1)[0][:, -1]
+            token_dists[token_dists < low_prob_thresh.unsqueeze(1)] = 0. # Removing them at all
+
             return Categorical(logits=token_dists/self.temperature).sample()
         else:
             raise NotImplementedError
