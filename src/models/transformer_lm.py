@@ -18,7 +18,7 @@ class TransformerLM(nn.Module):
         # Weight tying. TODO: check if it works
         self.output_layer.project.weight = self.input_layer.embed.weight
 
-    def forward(self, x, return_state:bool=False, cache:List[torch.Tensor]=None):
+    def forward(self, x, cache=None, return_state:bool=False):
         state = [self.input_layer(x)]
 
         for layer in self.layers:
@@ -68,6 +68,9 @@ class TransformerInputLayer(nn.Module):
         return h
 
     def cached_forward(self, x, cache:torch.Tensor=None):
+        assert cache.size(0) == x.size(0)
+        assert cache.size(1) == x.size(1) - 1, f'Cache size is {cache.size()} and input size is {x.size()}'
+
         x_last = x[:, -1:].long()
         pos_last = torch.full((x.size(0), 1), x.size(1) - 1, device=x.device, dtype=x_last.dtype)
         h_last = self.embed(x_last) + self.pos_embed(pos_last)
@@ -149,3 +152,25 @@ class TransformerOutputLayer(nn.Module):
 
     def forward(self, x):
         return self.project(x)
+
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, config):
+        super(PositionalEncoding, self).__init__()
+
+        # Compute the positional encodings in log space.
+        pe = torch.zeros(config.pe_max_len, config.d_model)
+
+        ln_enumerator = torch.log(torch.arange(0., config.pe_max_len))
+        ln_denumerator = torch.arange(0., config.d_model, 2) * (4 * np.log(10) / config.d_model)
+        inner_term = torch.exp(ln_enumerator.unsqueeze(1) - ln_denumerator.unsqueeze(0))
+
+        pe[:, 0::2] = torch.sin(inner_term)
+        pe[:, 1::2] = torch.cos(inner_term)
+
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        assert x.dim() == 3 # batch_size * seq_len * emb_size
+
+        return x + self.pe[:x.size(1)].unsqueeze(0)

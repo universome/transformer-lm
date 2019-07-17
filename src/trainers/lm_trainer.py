@@ -16,6 +16,7 @@ from src.models.transformer_lm import TransformerLM
 from src.utils import itos_many
 from src.optims.triangle_adam import TriangleAdam
 from src.inference import InferenceState
+from src.losses.cross_entropy_without_pads import cross_entropy_without_pads
 
 
 class LMTrainer(BaseTrainer):
@@ -32,7 +33,7 @@ class LMTrainer(BaseTrainer):
         data_train = open(data_path_train).read().splitlines()
         data_val = open(data_path_val).read().splitlines()[:self.config.get('val_set_size')]
 
-        field = Field(init_token='<bos>', eos_token='<eos>', batch_first=True)
+        field = Field(init_token='<bos>', eos_token='<eos>', batch_first=True, pad_first=True)
 
         train_examples = [Example.fromlist([x], [('text', field)]) for x in data_train]
         val_examples = [Example.fromlist([x], [('text', field)]) for x in data_val]
@@ -45,19 +46,19 @@ class LMTrainer(BaseTrainer):
         self.train_dataloader = data.BucketIterator(train_ds, self.config.hp.batch_size, repeat=False)
         self.val_dataloader = data.BucketIterator(val_ds, batch_size=self.config.hp.batch_size, shuffle=False, repeat=False)
 
-        print('Dataloaders initialized!')
+        print(f'Dataloaders initialized! Vocab size is {len(self.vocab)}')
 
     def init_models(self):
         self.model = TransformerLM(self.config.hp.transformer, self.vocab)
         self.model = self.model.to(self.config.firelab.device_name)
 
     def init_criterions(self):
-        self.criterion = nn.CrossEntropyLoss()
+        self.criterion = cross_entropy_without_pads(self.vocab)
         self.criterion = self.criterion.to(self.config.firelab.device_name)
 
     def init_optimizers(self):
         # self.optim = TriangleAdam(self.model.parameters(), self.config.hp.get('optim', {}))
-        self.optim = torch.optim.Adam(self.model.parameters(), lr=1e-4)
+        self.optim = torch.optim.Adam(self.model.parameters(), lr=5e-5)
 
     def train_on_batch(self, batch):
         loss = self.loss_on_batch(batch)
@@ -87,27 +88,26 @@ class LMTrainer(BaseTrainer):
 
         with torch.no_grad():
             for batch in self.val_dataloader:
+                num_words_to_output = 5
                 input = batch.text.to(self.config.firelab.device_name)
-                input = input[:, :5] # Leave only first 5 words
-                preds, input_state = self.model(input, return_state=True)
-                preds = preds.data[:, -1].argmax(dim=1, keepdim=True)
+                _, input_state = self.model(input[:, :-(num_words_to_output + 1)], return_state=True)
 
                 results = InferenceState({
                     "model": self.model.cached_forward,
                     "inputs": input_state,
                     "vocab": self.vocab,
                     "device": self.config.firelab.device_name,
-                    "max_len": 55,
+                    "max_len": 70,
                     "is_inputs_update_enabled": True,
                     "inputs_batch_dim": 1,
-                    "active_seqs": preds
+                    "active_seqs": input[:, :-num_words_to_output]
                 }).inference()
 
                 results = [x.cpu().numpy().tolist() for x in results]
-                results = itos_many(results, self.vocab)
+                results = itos_many(results, self.vocab, remove_special=True)
 
                 generated.extend(results)
-                sources.extend(itos_many(batch.text, self.vocab))
+                sources.extend(itos_many(batch.text, self.vocab, remove_special=True))
 
         texts = ['`{} => {}`'.format(s, g) for s, g in zip(sources, generated)]
         text = '\n\n'.join(texts)

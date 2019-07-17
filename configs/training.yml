@@ -1,13 +1,21 @@
 title: "Language Modeling with Transformer"
 trainer: "LMTrainer"
 random_seed: 42
-val_freq_epochs: 10
-num_val_examples_to_display: 100
+val_freq_iters: 1000
+# logging:
+#   training_progress: False
+checkpoint:
+  freq_epochs: 5
+  pickle: ["vocab"]
+modules:
+  models: ["model"]
+  optims: ["optim"]
 data:
   train: "data/classics.split.tok.5_50.common.bpe"
+  # train: "data/generated/classics.split.tok.5_50.common.bpe.tiny-val"
   val: "data/generated/classics.split.tok.5_50.common.bpe.tiny-val"
 hp:
-  batch_size: 64
+  batch_size: 200
   batch_len: 128
   transformer:
     d_model: 512

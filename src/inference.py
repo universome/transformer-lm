@@ -25,6 +25,9 @@ class InferenceState:
         self.pad_idx = self.vocab.stoi[self.pad_token]
         self.unk_idx = self.vocab.stoi[self.unk_token]
         self.max_len = state_dict.get('max_len', 100)
+
+        # Useful for RNN so not to compute extra steps
+        self.ignore_old_active_seqs = state_dict.get('ignore_old_active_seqs', False)
         self.temperature = state_dict.get('temperature', 1)
         self.sample_type = state_dict.get('sample_type', 'max') # max or sample
         self.kwargs = state_dict.get('kwargs', {})
@@ -100,7 +103,7 @@ class InferenceState:
             self.finished[i] = seq
 
     def update_active_seqs(self):
-        "Removing finished sequences from the batch"
+        """Removing finished sequences from the batch"""
         next_x = self.next_tokens if not self.gumbel else self.next_tokens_dists
         self.active_seqs = T.cat([self.active_seqs, next_x.unsqueeze(1)], dim=-1)
         self.active_seqs = self.active_seqs[~self.finished_mask()]
@@ -125,9 +128,9 @@ class InferenceState:
 
         # TODO: this is really dirty
         if self.is_inputs_update_enabled:
-            next_tokens_dists, inputs = self.model(self.active_seqs[:, self.num_steps_done:], self.inputs, *args, **self.kwargs)
+            slice = self.num_steps_done if self.ignore_old_active_seqs else 0
+            next_tokens_dists, self.inputs = self.model(self.active_seqs[:, slice:], self.inputs, *args, **self.kwargs)
             next_tokens_dists = next_tokens_dists[:, -1]
-            self.inputs = inputs
         else:
             next_tokens_dists = self.model(self.active_seqs, self.inputs, *args, **self.kwargs)[:, -1]
 
