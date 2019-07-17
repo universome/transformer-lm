@@ -9,7 +9,7 @@ from src.utils import itos_many
 
 from src.models.transformer_lm import TransformerLM
 from src.inference import InferenceState
-
+from .utils import tokenize, apply_bpe
 
 DEVICE = 'cuda'
 
@@ -58,11 +58,14 @@ def predict(model, field, sentence_beginnings:List[str], max_len=50, batch_size=
     return results
 
 
-def build_predict_fn(model_path:str, model_config_path:str, vocab_path:str, max_len:int=50) -> Callable:
+def build_predict_fn(model_path:str, model_config_path:str, vocab_path:str, bpes_path:str, max_len:int=50) -> Callable:
     field = load_field(vocab_path)
     model = load_model(model_path, model_config_path, field)
 
     def predict_fn(sentence_beginnings:List[str]) -> List[str]:
+        sentence_beginnings = tokenize(sentence_beginnings)
+        sentence_beginnings = apply_bpe(bpes_path, sentence_beginnings)
+
         return predict(
             model=model,
             field=field,

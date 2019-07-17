@@ -1,6 +1,8 @@
 from subprocess import check_output
 from typing import List
 
+import nltk; nltk.download('punkt')
+
 
 def apply_bpe(bpes_path:str, sentences:List[str]) -> List[str]:
     """
@@ -13,3 +15,7 @@ def apply_bpe(bpes_path:str, sentences:List[str]) -> List[str]:
     results = results.splitlines()
 
     return results
+
+
+def tokenize(sentences:List[str]) -> List[str]:
+    return [' '.join(nltk.word_tokenize(s)) for s in sentences]
